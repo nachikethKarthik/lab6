@@ -261,8 +261,7 @@ typedef enum
   ES_SHORT_TIMEOUT,         /* signals that a short timer has expired */
   /* User-defined events start here */
   ES_NEW_KEY,               /* signals a new key received from terminal */
-  ES_LOCK,
-  ES_UNLOCK
+  ES_NEW_EDGE
 }ES_EventType_t;
 
 /****************************************************************************/

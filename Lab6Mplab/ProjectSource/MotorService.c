@@ -30,7 +30,8 @@
 #include "MotorService.h"
 #include "PIC32_AD_Lib.h"
 #include "dbprintf.h"
-
+#include "xc.h"
+#include "sys/attribs.h"
 /*----------------------------- Module Defines ----------------------------*/
 // PWM Configuration
 // PBCLK = 20 MHz, Target PWM freq = 200 Hz
@@ -63,8 +64,8 @@
 
 
 // Timer3 tick = 0.4 us with 1:8 prescaler at 20MHz PBCLK
-#define MIN_PERIOD          200     // Fast speed (tunable parameter)
-#define MAX_PERIOD          3000    // Slow speed (tunable parameter)
+#define MIN_PERIOD          900     // Fast speed (tunable parameter)
+#define MAX_PERIOD          2000    // Slow speed (tunable parameter)
 #define PERIOD_RANGE        (MAX_PERIOD - MIN_PERIOD)
 
 // RPM calculation constant (refer to tablet for proper calculations)
@@ -119,15 +120,17 @@ static void InitDirectionPWMPins(void);
 static void SetDutyCycle(uint32_t dutyCycle);
 static void InitInputCapture(void);
 static void InitBarGraphTimingPins(void);
-static void UpdateBarGraph(uint32_t period);
+static void UpdateBarGraph(uint16_t period);
 
 /*---------------------------- Module Variables ---------------------------*/
 // with the introduction of Gen2, we need a module level Priority variable
 static uint8_t MyPriority;
 
 // Shared with ISR (these variables need to be of the volatile datatype)
-static volatile uint32_t CurrentPeriod = 0;     
-static volatile uint32_t LastCapture = 0;                
+static volatile uint16_t CurrentPeriod = 0;     
+static volatile uint16_t LastCapture = 0;
+
+
 /*------------------------------ Module Code ------------------------------*/
 /****************************************************************************
  Function
@@ -236,7 +239,9 @@ ES_Event_t RunMotorService(ES_Event_t ThisEvent)
         case ES_NEW_EDGE:
             // New encoder edge detected - update bar graph
             
-            UpdateBarGraph(CurrentPeriod);
+//            UpdateBarGraph(CurrentPeriod);
+            
+            
             break;
         case ES_TIMEOUT:
             if (ThisEvent.EventParam == MOTOR_TIMER)
@@ -244,20 +249,29 @@ ES_Event_t RunMotorService(ES_Event_t ThisEvent)
                 // Read potentiometer value from ADC
                 uint32_t adcResult[1];
                 ADC_MultiRead(adcResult);
-                
-//                DB_printf("%d\r\n",adcResult[0]); 
+                 
                 // Scale ADC value (0-1023) to duty cycle (0-PWM_PERIOD)
                 uint32_t newDutyCycle = (adcResult[0] * PWM_PERIOD) / 1023;
                 
                 // Update PWM duty cycle
                 SetDutyCycle(newDutyCycle);
+                // Update bar graph 
+                __builtin_disable_interrupts();
+                uint16_t periodSnapshot = CurrentPeriod;
+                
+
+                // Update bar graph with the snapshot
+                UpdateBarGraph(periodSnapshot);
+
+                // Print period for debugging
+//                DB_printf("Period: %d\r\n", periodSnapshot);
                 
                 // Raise timing pin before RPM calculation
                 TIMING_PIN = 1;
                 
-                if (CurrentPeriod > 0)
+                if (periodSnapshot > 0)
                 {
-                    uint32_t wheelRPM = RPM_NUMERATOR / CurrentPeriod;
+                    uint32_t wheelRPM = RPM_NUMERATOR / periodSnapshot;
                     
                     // Lower timing pin after calculation ---> step 2.5
                     TIMING_PIN = 0;
@@ -265,7 +279,7 @@ ES_Event_t RunMotorService(ES_Event_t ThisEvent)
                     // Raise timing pin before printf (Part 2.6)
                     TIMING_PIN = 1;
                     
-                    DB_printf("\rRPM: %4d  Period: %5d", wheelRPM, CurrentPeriod);
+                    DB_printf("\rRPM: %d  Period: %d\n", wheelRPM, periodSnapshot);
                     
                     // Lower timing pin after printf (Part 2.6)
                     TIMING_PIN = 0;
@@ -273,11 +287,13 @@ ES_Event_t RunMotorService(ES_Event_t ThisEvent)
                 else
                 {
                     TIMING_PIN = 0;
-                    DB_printf("\rRPM: ----  Period: -----");
+                    DB_printf("\rRPM: ----  Period: -----\n");
                 }
                 // Restart timer for next reading
+                
                 ES_Timer_InitTimer(MOTOR_TIMER, ADC_UPDATE_TIME);
             }
+            __builtin_enable_interrupts();
             break;
             
         case ES_INIT:
@@ -289,7 +305,35 @@ ES_Event_t RunMotorService(ES_Event_t ThisEvent)
     }
   return ReturnEvent;
 }
+/***************************************************************************
+ ISR's
+ ***************************************************************************/
+void __ISR(_INPUT_CAPTURE_2_VECTOR, IPL6AUTO) IC2_ISR(void){
+    
+    uint16_t ThisCapture;
+    
+    // Drain the FIFO - read ALL buffered captures, keep only the last one
+    // ICBNE = 1 means buffer is not empty
+    while (IC2CONbits.ICBNE) {
+        ThisCapture = IC2BUF;
+    }
+    
+    // Calculate period (unsigned subtraction handles 16-bit rollover)
+    CurrentPeriod = ThisCapture - LastCapture;
+    
+    // Save for next edge
+    LastCapture = ThisCapture;
+    
+    // Clear interrupt flag AFTER reading buffer
+    IFS0CLR = _IFS0_IC2IF_MASK;
+    
+    // Post event to service to trigger bar graph update
+//    DB_printf("%d\r\n",LastCapture); 
+//    ES_Event_t NewEvent;
+//    NewEvent.EventType = ES_NEW_EDGE;
+//    PostMotorService(NewEvent);
 
+}
 /***************************************************************************
  private functions
  ***************************************************************************/
@@ -441,7 +485,7 @@ static void InitInputCapture(void)
     IC2CONbits.ON = 1;
 }
 
-static void UpdateBarGraph(uint32_t period)
+static void UpdateBarGraph(uint16_t period)
 {
     uint8_t numBars;
     
@@ -451,38 +495,27 @@ static void UpdateBarGraph(uint32_t period)
     // Determine number of bars to light
     if (period <= MIN_PERIOD)
     {
-        numBars = 1;
+        numBars = 8;  // Fast = more bars (or 1 if you prefer opposite)
     }
     else if (period >= MAX_PERIOD)
     {
-        numBars = 8;
+        numBars = 1;  // Slow = fewer bars
     }
     else
     {
-        // Linear interpolation: 1 + 7 * (period - MIN) / RANGE
-        numBars = 1 + (7 * (period - MIN_PERIOD)) / PERIOD_RANGE;
+        // Linear interpolation: 8 - 7 * (period - MIN) / RANGE
+        numBars = 8 - (7 * (period - MIN_PERIOD)) / PERIOD_RANGE;
     }
     
-    // Turn off all LEDs first
-    BAR1 = 0;
-    BAR2 = 0;
-    BAR3 = 0;
-    BAR4 = 0;
-    BAR5 = 0;
-    BAR6 = 0;
-    BAR7 = 0;
-    BAR8 = 0;
-    
-    // Light bars from top down based on numBars
-    // Bar 1 (top) = RA1, Bar 8 (bottom) = RB15
-    if (numBars >= 1) BAR1 = 1;
-    if (numBars >= 2) BAR2 = 1;
-    if (numBars >= 3) BAR3 = 1;
-    if (numBars >= 4) BAR4 = 1;
-    if (numBars >= 5) BAR5 = 1;
-    if (numBars >= 6) BAR6 = 1;
-    if (numBars >= 7) BAR7 = 1;
-    if (numBars >= 8) BAR8 = 1;
+    // Update each LED directly based on numBars (no flicker)
+    BAR1 = (numBars >= 1);
+    BAR2 = (numBars >= 2);
+    BAR3 = (numBars >= 3);
+    BAR4 = (numBars >= 4);
+    BAR5 = (numBars >= 5);
+    BAR6 = (numBars >= 6);
+    BAR7 = (numBars >= 7);
+    BAR8 = (numBars >= 8);
     
     // Lower timing pin after writing to LEDs (Part 2.3)
     TIMING_PIN = 0;
