@@ -267,14 +267,14 @@ ES_Event_t RunMotorService(ES_Event_t ThisEvent)
 //                DB_printf("Period: %d\r\n", periodSnapshot);
                 
                 // Raise timing pin before RPM calculation
-                TIMING_PIN = 1;
+//                TIMING_PIN = 1;
                 
                 if (periodSnapshot > 0)
                 {
                     uint32_t wheelRPM = RPM_NUMERATOR / periodSnapshot;
                     
                     // Lower timing pin after calculation ---> step 2.5
-                    TIMING_PIN = 0;
+//                    TIMING_PIN = 0;
                     
                     // Raise timing pin before printf (Part 2.6)
                     TIMING_PIN = 1;
@@ -490,7 +490,7 @@ static void UpdateBarGraph(uint16_t period)
     uint8_t numBars;
     
     // Raise timing pin before calculation (Part 2.3)
-    TIMING_PIN = 1;
+//    TIMING_PIN = 1;
     
     // Determine number of bars to light
     if (period <= MIN_PERIOD)
@@ -518,7 +518,7 @@ static void UpdateBarGraph(uint16_t period)
     BAR8 = (numBars >= 8);
     
     // Lower timing pin after writing to LEDs (Part 2.3)
-    TIMING_PIN = 0;
+//    TIMING_PIN = 0;
 }
 /*------------------------------- Footnotes -------------------------------*/
 /*------------------------------ End of file ------------------------------*/
