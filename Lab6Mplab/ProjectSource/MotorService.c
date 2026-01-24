@@ -33,13 +33,33 @@
 #include "xc.h"
 #include "sys/attribs.h"
 /*----------------------------- Module Defines ----------------------------*/
-// PWM Configuration
-// PBCLK = 20 MHz, Target PWM freq = 200 Hz
-// With prescaler 1:4: PWM Period = (PR2 + 1) * PRESCALER / 20MHz
-// For 200 Hz: Period = 5ms = (PR2 + 1) * 200ns
-// PR2 + 1 = 5ms / 200ns = 25000, so PR2 = 24999
-#define PWM_PERIOD          24999
+// PWM Prescaler (1:4 for all frequencies)
 #define PWM_PRESCALE        0b010       // 1:4 prescaler
+// PBCLK = 20 MHz, Prescaler = 1:4 -> Effective clock = 5 MHz
+// PR2 = (5,000,000 / freq) - 1
+#define NUM_FREQUENCIES     6
+
+// PWM Period values for each frequency (PR2 values)
+// Index:  0       1       2       3       4       5
+// Freq:   250Hz   500Hz   1kHz    2kHz    5kHz    10kHz
+static const uint16_t PWM_PERIODS[NUM_FREQUENCIES] = {
+    19999,  // 250 Hz
+    9999,   // 500 Hz
+    4999,   // 1 kHz
+    2499,   // 2 kHz
+    999,    // 5 kHz
+    499     // 10 kHz
+};
+
+// Frequency labels for printing
+static const char* FREQ_LABELS[NUM_FREQUENCIES] = {
+    "250 Hz",
+    "500 Hz",
+    "1 kHz",
+    "2 kHz",
+    "5 kHz",
+    "10 kHz"
+};
 
 // ADC update rate 10 Hz
 #define ADC_UPDATE_TIME     100
@@ -121,6 +141,8 @@ static void SetDutyCycle(uint32_t dutyCycle);
 static void InitInputCapture(void);
 static void InitBarGraphTimingPins(void);
 static void UpdateBarGraph(uint16_t period);
+static void SetPWMFrequency(uint8_t freqIndex);
+
 
 /*---------------------------- Module Variables ---------------------------*/
 // with the introduction of Gen2, we need a module level Priority variable
@@ -129,6 +151,12 @@ static uint8_t MyPriority;
 // Shared with ISR (these variables need to be of the volatile datatype)
 static volatile uint16_t CurrentPeriod = 0;     
 static volatile uint16_t LastCapture = 0;
+
+static uint8_t CurrentFreqIndex = 0;            // Start at 250 Hz
+static uint16_t CurrentPWMPeriod = 19999;       // PR2 value for current frequency
+
+static uint32_t LastADCValue = 0;
+
 
 
 /*------------------------------ Module Code ------------------------------*/
@@ -172,6 +200,12 @@ bool InitMotorService(uint8_t Priority)
     
     // Initialize input capture for encoder
     InitInputCapture();
+    
+    DB_printf("Press '1'-'6' to change PWM frequency:\r\n");
+    DB_printf("  1=250Hz  2=500Hz  3=1kHz\r\n");
+    DB_printf("  4=2kHz   5=5kHz   6=10kHz\r\n");
+    DB_printf("Current: %s\r\n\n", FREQ_LABELS[CurrentFreqIndex]);
+    
     
     // Start the periodic ADC read timer (10 Hz)
     ES_Timer_InitTimer(MOTOR_TIMER, ADC_UPDATE_TIME);
@@ -236,29 +270,43 @@ ES_Event_t RunMotorService(ES_Event_t ThisEvent)
    *******************************************/
   switch (ThisEvent.EventType)
     {
-        case ES_NEW_EDGE:
-            // New encoder edge detected - update bar graph
-            
-//            UpdateBarGraph(CurrentPeriod);
-            
-            
+        case ES_NEW_KEY:
+            // Part 3: Handle frequency change via keyboard
+            {
+                char key = (char)ThisEvent.EventParam;
+                
+                // Check for keys '1' through '6'
+                if (key >= '1' && key <= '6')
+                {
+                    uint8_t newIndex = key - '1';  // Convert '1'-'6' to 0-5
+                    SetPWMFrequency(newIndex);
+                    
+                    DB_printf("\r\n>>> PWM Frequency changed to: %s <<<\r\n\n", 
+                              FREQ_LABELS[CurrentFreqIndex]);
+                }
+            }
             break;
+            
+            
+            
         case ES_TIMEOUT:
             if (ThisEvent.EventParam == MOTOR_TIMER)
             {
                 // Read potentiometer value from ADC
                 uint32_t adcResult[1];
                 ADC_MultiRead(adcResult);
-                 
+                LastADCValue = adcResult[0];
+                
+                
                 // Scale ADC value (0-1023) to duty cycle (0-PWM_PERIOD)
-                uint32_t newDutyCycle = (adcResult[0] * PWM_PERIOD) / 1023;
+                uint32_t newDutyCycle = (adcResult[0] * CurrentPWMPeriod) / 1023;
                 
                 // Update PWM duty cycle
                 SetDutyCycle(newDutyCycle);
                 // Update bar graph 
                 __builtin_disable_interrupts();
                 uint16_t periodSnapshot = CurrentPeriod;
-                
+                 __builtin_enable_interrupts();
 
                 // Update bar graph with the snapshot
                 UpdateBarGraph(periodSnapshot);
@@ -277,23 +325,29 @@ ES_Event_t RunMotorService(ES_Event_t ThisEvent)
 //                    TIMING_PIN = 0;
                     
                     // Raise timing pin before printf (Part 2.6)
-                    TIMING_PIN = 1;
+//                    TIMING_PIN = 1;
+                    DB_printf("\r[%s] RPM: %d  Period: %d  DC: %d%%", 
+                              FREQ_LABELS[CurrentFreqIndex],
+                              wheelRPM, 
+                              periodSnapshot,
+                              (adcResult[0] * 100) / 1023);
                     
-                    DB_printf("\rRPM: %d  Period: %d\n", wheelRPM, periodSnapshot);
                     
                     // Lower timing pin after printf (Part 2.6)
-                    TIMING_PIN = 0;
+//                    TIMING_PIN = 0;
                 }
                 else
                 {
-                    TIMING_PIN = 0;
-                    DB_printf("\rRPM: ----  Period: -----\n");
+//                    TIMING_PIN = 0;
+                    DB_printf("\r[%s] RPM: ----  Period: -----  DC: %d%%",
+                              FREQ_LABELS[CurrentFreqIndex],
+                              (adcResult[0] * 100) / 1023);
                 }
                 // Restart timer for next reading
                 
                 ES_Timer_InitTimer(MOTOR_TIMER, ADC_UPDATE_TIME);
             }
-            __builtin_enable_interrupts();
+           
             break;
             
         case ES_INIT:
@@ -337,6 +391,36 @@ void __ISR(_INPUT_CAPTURE_2_VECTOR, IPL6AUTO) IC2_ISR(void){
 /***************************************************************************
  private functions
  ***************************************************************************/
+
+static void SetPWMFrequency(uint8_t freqIndex)
+{
+    if (freqIndex >= NUM_FREQUENCIES)
+    {
+        return;  // Invalid index
+    }
+    
+    // Update tracking variables
+    CurrentFreqIndex = freqIndex;
+    CurrentPWMPeriod = PWM_PERIODS[freqIndex];
+    
+    // Briefly disable Timer2 while changing period
+    T2CONbits.ON = 0;
+    
+    // Update period register
+    PR2 = CurrentPWMPeriod;
+    
+    // Clear timer to avoid glitches
+    TMR2 = 0;
+    
+    // Recalculate duty cycle to maintain same percentage
+    uint32_t newDutyCycle = (LastADCValue * CurrentPWMPeriod) / 1023;
+    OC4RS = newDutyCycle;
+    OC4R = newDutyCycle;
+    
+    // Re-enable Timer2
+    T2CONbits.ON = 1;
+}
+
 static void InitDirectionPWMPins(void)
 {
     // Disable analog function on RB2 and RB3 and RB13 (they are AN4 and AN5)
@@ -367,7 +451,7 @@ static void InitPWM(void)
     
     TMR2 = 0;
     
-    PR2 = PWM_PERIOD;
+    PR2 = CurrentPWMPeriod;
     
 //    IFS0CLR = _IFS0_T2IF_MASK;
     //Enable Timer2
@@ -428,9 +512,9 @@ static void InitBarGraphTimingPins(void)
 static void SetDutyCycle(uint32_t dutyCycle)
 {
     // Clamp duty cycle to valid range
-    if (dutyCycle > PWM_PERIOD)
+    if (dutyCycle > CurrentPWMPeriod)
     {
-        dutyCycle = PWM_PERIOD;
+        dutyCycle = CurrentPWMPeriod;
     }
     
     // Write to OC4RS (double-buffered, updates on next period match)
