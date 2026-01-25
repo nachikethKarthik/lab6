@@ -1,0 +1,612 @@
+{\rtf1\ansi \deff1{\fonttbl{\f1\fmodern\fprq1\fcharset0 Consolas;}}{\colortbl;\red255\green255\blue255;\red51\green00\blue102;\red24\green97\blue167;\red50\green186\blue06;\red00\green102\blue51;\red00\green102\blue51;\red166\green23\blue97;\red83\green116\blue176;\red102\green51\blue00;\red154\green154\blue154;\red85\green85\blue85;\red166\green23\blue97;\red255\green00\blue00;\red255\green00\blue00;\red255\green48\blue48;\red244\green140\blue35;\red209\green28\blue237;\red221\green130\blue13;\red119\green106\blue184;}
+\paperw11905\paperh16837\margl1134\margr1134\margt1134\margb1134\sectd\plain\f1\fs20
+\pard \cbpat1{{\cf2{}}{\cf6{/****************************************************************************}}}\par\pard
+\cbpat1{{\cf6{ Module}}}\par\pard
+\cbpat1{{\cf6{   MotorService.c}}}\par\pard
+\cbpat1{{\cf6{}}}\par\pard
+\cbpat1{{\cf6{ Revision}}}\par\pard
+\cbpat1{{\cf6{   {1}.{0}.{0}}}}\par\pard
+\cbpat1{{\cf6{}}}\par\pard
+\cbpat1{{\cf6{ Description}}}\par\pard
+\cbpat1{{\cf6{   This service implements PWM motor control using OC{4} and Timer{2}.}}}\par\pard
+\cbpat1{{\cf6{   Motor speed is controlled by a potentiometer read via ADC at {1}{0}Hz.}}}\par\pard
+\cbpat1{{\cf6{}}}\par\pard
+\cbpat1{{\cf6{ Notes}}}\par\pard
+\cbpat1{{\cf6{   - PWM output on RB{1}{3} (pin {2}{4}) via OC{4}}}}\par\pard
+\cbpat1{{\cf6{   - Potentiometer input on AN{0}/RA{0} (pin {2})}}}\par\pard
+\cbpat1{{\cf6{   - Direction control on RB{2} ({1}A) and RB{3} ({2}A)}}}\par\pard
+\cbpat1{{\cf6{   - PWM frequency approximately {2}{0}{0}Hz for part {1}}}}\par\pard
+\cbpat1{{\cf6{}}}\par\pard
+\cbpat1{{\cf6{ History}}}\par\pard
+\cbpat1{{\cf6{ When           Who     What/Why}}}\par\pard
+\cbpat1{{\cf6{ -------------- ---     --------}}}\par\pard
+\cbpat1{{\cf6{ {0}{1}/{2}{1}/{2}{0}{2}{6}     karthi{2}{4}    started conversion from template file}}}\par\pard
+\cbpat1{{\cf6{ {0}{1}/{1}{6}/{1}{2} {0}{9}:{5}{8} jec      began conversion from TemplateFSM.c}}}\par\pard
+\cbpat1{{\cf6{****************************************************************************/}}{\cf2{}}}\par\pard
+\cbpat1{{\cf2{}}{\cf6{/*----------------------------- Include Files -----------------------------*/}}{\cf2{}}}\par\pard
+\cbpat1{{\cf2{}}{\cf6{/* include header files for this state machine as well as any machines at the}}}\par\pard
+\cbpat1{{\cf6{   next lower level in the hierarchy that are sub-machines to this machine}}}\par\pard
+\cbpat1{{\cf6{*/}}{\cf2{}}}\par\pard
+\cbpat1{{\cf2{}}{\cf8{#include}} {\cf9{"ES_Configure.h"}}{\cf8{}}}\par\pard
+\cbpat1{{\cf2{}}{\cf8{#include}} {\cf9{"ES_Framework.h"}}{\cf8{}}}\par\pard
+\cbpat1{{\cf2{}}{\cf8{#include}} {\cf9{"MotorService.h"}}{\cf8{}}}\par\pard
+\cbpat1{{\cf2{}}{\cf8{#include}} {\cf9{"PIC{3}{2}_AD_Lib.h"}}{\cf8{}}}\par\pard
+\cbpat1{{\cf2{}}{\cf8{#include}} {\cf9{"dbprintf.h"}}{\cf8{}}}\par\pard
+\cbpat1{{\cf2{}}{\cf8{#include}} {\cf9{"xc.h"}}{\cf8{}}}\par\pard
+\cbpat1{{\cf2{}}{\cf8{#include}} {\cf9{"sys/attribs.h"}}{\cf8{}}}\par\pard
+\cbpat1{{\cf2{}}{\cf6{/*----------------------------- Module Defines ----------------------------*/}}{\cf2{}}}\par\pard
+\cbpat1{{\cf2{}}{\cf5{// PWM Prescaler ({1}:{4} for all frequencies)}}}\par\pard
+\cbpat1{{\cf2{}}{\cf8{#define PWM_PRESCALE        {0}b{0}{1}{0}}}       {\cf5{// {1}:{4} prescaler}}}\par\pard
+\cbpat1{{\cf8{}}{\cf2{}}{\cf5{// PBCLK = {2}{0} MHz, Prescaler = {1}:{4} -> Effective clock = {5} MHz}}}\par\pard
+\cbpat1{{\cf2{}}{\cf5{// PR{2} = ({5},{0}{0}{0},{0}{0}{0} / freq) - {1}}}}\par\pard
+\cbpat1{{\cf2{}}{\cf8{#define NUM_FREQUENCIES     {6}}}}\par\pard
+\cbpat1{{\cf2{}}}\par\pard
+\cbpat1{{\cf2{}}{\cf5{// PWM Period values for each frequency (PR{2} values)}}}\par\pard
+\cbpat1{{\cf2{}}{\cf5{// Index:  {0}       {1}       {2}       {3}       {4}       {5}}}}\par\pard
+\cbpat1{{\cf2{}}{\cf5{// Freq:   {2}{5}{0}Hz   {5}{0}{0}Hz   {1}kHz    {2}kHz    {5}kHz    {1}{0}kHz}}}\par\pard
+\cbpat1{{\cf2{}}{\cf16{static const uint{1}{6}_t}} {\cf2{PWM_PERIODS}}{\cf11{[}}{\cf2{NUM_FREQUENCIES}}{\cf11{] = \{}}}\par\pard
+\cbpat1{{\cf2{}}    {\cf4{{1}{9}{9}{9}{9}}}{\cf2{}}{\cf11{,}}  {\cf2{}}{\cf5{// {2}{5}{0} Hz}}}\par\pard
+\cbpat1{{\cf2{}}    {\cf4{{9}{9}{9}{9}}}{\cf2{}}{\cf11{,}}   {\cf2{}}{\cf5{// {5}{0}{0} Hz}}}\par\pard
+\cbpat1{{\cf2{}}    {\cf4{{4}{9}{9}{9}}}{\cf2{}}{\cf11{,}}   {\cf2{}}{\cf5{// {1} kHz}}}\par\pard
+\cbpat1{{\cf2{}}    {\cf4{{2}{4}{9}{9}}}{\cf2{}}{\cf11{,}}   {\cf2{}}{\cf5{// {2} kHz}}}\par\pard
+\cbpat1{{\cf2{}}    {\cf4{{9}{9}{9}}}{\cf2{}}{\cf11{,}}    {\cf2{}}{\cf5{// {5} kHz}}}\par\pard
+\cbpat1{{\cf2{}}    {\cf4{{4}{9}{9}}}     {\cf2{}}{\cf5{// {1}{0} kHz}}}\par\pard
+\cbpat1{{\cf2{}}{\cf11{\};}}}\par\pard
+\cbpat1{{\cf2{}}}\par\pard
+\cbpat1{{\cf2{}}{\cf5{// Frequency labels for printing}}}\par\pard
+\cbpat1{{\cf2{}}{\cf16{static const char}}{\cf2{}}{\cf11{*}} {\cf2{FREQ_LABELS}}{\cf11{[}}{\cf2{NUM_FREQUENCIES}}{\cf11{] = \{}}}\par\pard
+\cbpat1{{\cf2{}}    {\cf3{"{2}{5}{0} Hz"}}{\cf2{}}{\cf11{,}}}\par\pard
+\cbpat1{{\cf2{}}    {\cf3{"{5}{0}{0} Hz"}}{\cf2{}}{\cf11{,}}}\par\pard
+\cbpat1{{\cf2{}}    {\cf3{"{1} kHz"}}{\cf2{}}{\cf11{,}}}\par\pard
+\cbpat1{{\cf2{}}    {\cf3{"{2} kHz"}}{\cf2{}}{\cf11{,}}}\par\pard
+\cbpat1{{\cf2{}}    {\cf3{"{5} kHz"}}{\cf2{}}{\cf11{,}}}\par\pard
+\cbpat1{{\cf2{}}    {\cf3{"{1}{0} kHz"}}{\cf2{}}}\par\pard
+\cbpat1{{\cf2{}}{\cf11{\};}}}\par\pard
+\cbpat1{{\cf2{}}}\par\pard
+\cbpat1{{\cf2{}}{\cf5{// ADC update rate {1}{0} Hz}}}\par\pard
+\cbpat1{{\cf2{}}{\cf8{#define ADC_UPDATE_TIME     {1}{0}{0}}}}\par\pard
+\cbpat1{{\cf2{}}}\par\pard
+\cbpat1{{\cf2{}}}\par\pard
+\cbpat1{{\cf2{}}}\par\pard
+\cbpat1{{\cf2{}}{\cf5{// Direction pin definitions}}}\par\pard
+\cbpat1{{\cf2{}}{\cf8{#define DIR_{1}A_TRIS         TRISBbits.TRISB{2}}}}\par\pard
+\cbpat1{{\cf2{}}{\cf8{#define DIR_{1}A_ANSEL        ANSELBbits.ANSB{2}}}}\par\pard
+\cbpat1{{\cf2{}}{\cf8{#define DIR_{1}A              LATBbits.LATB{2}}}}\par\pard
+\cbpat1{{\cf2{}}}\par\pard
+\cbpat1{{\cf2{}}{\cf8{#define DIR_{2}A_TRIS         TRISBbits.TRISB{3}}}}\par\pard
+\cbpat1{{\cf2{}}{\cf8{#define DIR_{2}A_ANSEL        ANSELBbits.ANSB{3}}}}\par\pard
+\cbpat1{{\cf2{}}{\cf8{#define DIR_{2}A              LATBbits.LATB{3}}}}\par\pard
+\cbpat1{{\cf2{}}}\par\pard
+\cbpat1{{\cf2{}}{\cf5{//pwm pin definition}}}\par\pard
+\cbpat1{{\cf2{}}{\cf8{#define PWM_PIN_TRIS        TRISBbits.TRISB{1}{3}}}}\par\pard
+\cbpat1{{\cf2{}}{\cf8{#define PWM_PIN_ANSEL       ANSELBbits.ANSB{1}{3}}}}\par\pard
+\cbpat1{{\cf2{}}}\par\pard
+\cbpat1{{\cf2{}}{\cf5{// Timer{3} prescaler for input capture ({1}:{8})}}}\par\pard
+\cbpat1{{\cf2{}}{\cf8{#define IC_TIMER_PRESCALE   {0}b{0}{1}{1}}}}\par\pard
+\cbpat1{{\cf2{}}}\par\pard
+\cbpat1{{\cf2{}}}\par\pard
+\cbpat1{{\cf2{}}{\cf5{// Timer{3} tick = {0}.{4} us with {1}:{8} prescaler at {2}{0}MHz PBCLK}}}\par\pard
+\cbpat1{{\cf2{}}{\cf8{#define MIN_PERIOD          {9}{0}{0}}}     {\cf5{// Fast speed (tunable parameter)}}}\par\pard
+\cbpat1{{\cf8{}}{\cf2{}}{\cf8{#define MAX_PERIOD          {2}{0}{0}{0}}}    {\cf5{// Slow speed (tunable parameter)}}}\par\pard
+\cbpat1{{\cf8{}}{\cf2{}}{\cf8{#define PERIOD_RANGE        (MAX_PERIOD - MIN_PERIOD)}}}\par\pard
+\cbpat1{{\cf2{}}}\par\pard
+\cbpat1{{\cf2{}}{\cf5{// RPM calculation constant (refer to tablet for proper calculations)}}}\par\pard
+\cbpat1{{\cf2{}}{\cf5{// Output wheel: {5}{1}{2} pulses/rev * {5}.{9} gearbox = {3}{0}{2}{0}.{8} pulses/rev}}}\par\pard
+\cbpat1{{\cf2{}}{\cf5{// Timer tick = {0}.{4} us, so frequency = {2},{5}{0}{0},{0}{0}{0} ticks/sec}}}\par\pard
+\cbpat1{{\cf2{}}{\cf5{// RPM = ({2},{5}{0}{0},{0}{0}{0} / Period) / {3}{0}{2}{0}.{8} * {6}{0} = {4}{9},{6}{5}{6} / Period}}}\par\pard
+\cbpat1{{\cf2{}}{\cf8{#define RPM_NUMERATOR       {4}{9}{6}{5}{6}}}}\par\pard
+\cbpat1{{\cf2{}}}\par\pard
+\cbpat1{{\cf2{}}{\cf5{// Timing pin (RB{5}) for scope measurement}}}\par\pard
+\cbpat1{{\cf2{}}{\cf8{#define TIMING_PIN_TRIS     TRISBbits.TRISB{5}}}}\par\pard
+\cbpat1{{\cf2{}}{\cf8{#define TIMING_PIN          LATBbits.LATB{5}}}}\par\pard
+\cbpat1{{\cf2{}}}\par\pard
+\cbpat1{{\cf2{}}{\cf5{// Bar graph pin definitions}}}\par\pard
+\cbpat1{{\cf2{}}{\cf5{// Top to bottom: RA{1}, RA{2}, RA{3}, RA{4}, RB{8}, RB{1}{0}, RB{1}{1}, RB{1}{5}}}}\par\pard
+\cbpat1{{\cf2{}}{\cf8{#define BAR{1}_TRIS           TRISAbits.TRISA{1}}}}\par\pard
+\cbpat1{{\cf2{}}{\cf8{#define BAR{1}_ANSEL           ANSELAbits.ANSA{1}}}}\par\pard
+\cbpat1{{\cf2{}}{\cf8{#define BAR{1}                LATAbits.LATA{1}}}}\par\pard
+\cbpat1{{\cf2{}}}\par\pard
+\cbpat1{{\cf2{}}{\cf8{#define BAR{2}_TRIS           TRISAbits.TRISA{2}}}}\par\pard
+\cbpat1{{\cf2{}}{\cf5{// A{2} doesnt have an ANSEL register}}}\par\pard
+\cbpat1{{\cf2{}}{\cf8{#define BAR{2}                LATAbits.LATA{2}}}}\par\pard
+\cbpat1{{\cf2{}}}\par\pard
+\cbpat1{{\cf2{}}{\cf8{#define BAR{3}_TRIS           TRISAbits.TRISA{3}}}}\par\pard
+\cbpat1{{\cf2{}}{\cf5{// A{3} doesnt have an ANSEL}}}\par\pard
+\cbpat1{{\cf2{}}{\cf8{#define BAR{3}                LATAbits.LATA{3}}}}\par\pard
+\cbpat1{{\cf2{}}}\par\pard
+\cbpat1{{\cf2{}}{\cf8{#define BAR{4}_TRIS           TRISAbits.TRISA{4}}}}\par\pard
+\cbpat1{{\cf2{}}{\cf5{// A{4} doesnt have an ANSEL}}}\par\pard
+\cbpat1{{\cf2{}}{\cf8{#define BAR{4}                LATAbits.LATA{4}}}}\par\pard
+\cbpat1{{\cf2{}}}\par\pard
+\cbpat1{{\cf2{}}{\cf8{#define BAR{5}_TRIS           TRISBbits.TRISB{8}}}}\par\pard
+\cbpat1{{\cf2{}}{\cf5{// B{8} does not have an ANSEL}}}\par\pard
+\cbpat1{{\cf2{}}{\cf8{#define BAR{5}                LATBbits.LATB{8}}}}\par\pard
+\cbpat1{{\cf2{}}}\par\pard
+\cbpat1{{\cf2{}}{\cf8{#define BAR{6}_TRIS           TRISBbits.TRISB{1}{0}}}}\par\pard
+\cbpat1{{\cf2{}}{\cf5{// B{1}{0} does not have an ANSEL}}}\par\pard
+\cbpat1{{\cf2{}}{\cf8{#define BAR{6}                LATBbits.LATB{1}{0}}}}\par\pard
+\cbpat1{{\cf2{}}}\par\pard
+\cbpat1{{\cf2{}}{\cf8{#define BAR{7}_TRIS           TRISBbits.TRISB{1}{1}}}}\par\pard
+\cbpat1{{\cf2{}}{\cf5{//B{1}{1} does not have an ANSEL}}}\par\pard
+\cbpat1{{\cf2{}}{\cf8{#define BAR{7}                LATBbits.LATB{1}{1}}}}\par\pard
+\cbpat1{{\cf2{}}}\par\pard
+\cbpat1{{\cf2{}}{\cf8{#define BAR{8}_TRIS           TRISBbits.TRISB{1}{5}}}}\par\pard
+\cbpat1{{\cf2{}}{\cf8{#define BAR{8}_ANSEL          ANSELBbits.ANSB{1}{5}}}   {\cf5{// RB{1}{5} is AN{9}}}}\par\pard
+\cbpat1{{\cf8{}}{\cf2{}}{\cf8{#define BAR{8}                LATBbits.LATB{1}{5}}}}\par\pard
+\cbpat1{{\cf2{}}{\cf6{/*---------------------------- Module Functions ---------------------------*/}}{\cf2{}}}\par\pard
+\cbpat1{{\cf2{}}{\cf6{/* prototypes for private functions for this service.They should be functions}}}\par\pard
+\cbpat1{{\cf6{   relevant to the behavior of this service}}}\par\pard
+\cbpat1{{\cf6{*/}}{\cf2{}}}\par\pard
+\cbpat1{{\cf2{}}{\cf16{static void}} {\cf2{}}{\cf17{InitPWM}}{\cf2{}}{\cf11{(}}{\cf2{}}{\cf16{void}}{\cf2{}}{\cf11{);}}}\par\pard
+\cbpat1{{\cf2{}}{\cf16{static void}} {\cf2{}}{\cf17{InitDirectionPWMPins}}{\cf2{}}{\cf11{(}}{\cf2{}}{\cf16{void}}{\cf2{}}{\cf11{);}}}\par\pard
+\cbpat1{{\cf2{}}{\cf16{static void}} {\cf2{}}{\cf17{SetDutyCycle}}{\cf2{}}{\cf11{(}}{\cf2{}}{\cf16{uint{3}{2}_t}} {\cf2{dutyCycle}}{\cf11{);}}}\par\pard
+\cbpat1{{\cf2{}}{\cf16{static void}} {\cf2{}}{\cf17{InitInputCapture}}{\cf2{}}{\cf11{(}}{\cf2{}}{\cf16{void}}{\cf2{}}{\cf11{);}}}\par\pard
+\cbpat1{{\cf2{}}{\cf16{static void}} {\cf2{}}{\cf17{InitBarGraphTimingPins}}{\cf2{}}{\cf11{(}}{\cf2{}}{\cf16{void}}{\cf2{}}{\cf11{);}}}\par\pard
+\cbpat1{{\cf2{}}{\cf16{static void}} {\cf2{}}{\cf17{UpdateBarGraph}}{\cf2{}}{\cf11{(}}{\cf2{}}{\cf16{uint{1}{6}_t}} {\cf2{period}}{\cf11{);}}}\par\pard
+\cbpat1{{\cf2{}}{\cf16{static void}} {\cf2{}}{\cf17{SetPWMFrequency}}{\cf2{}}{\cf11{(}}{\cf2{}}{\cf16{uint{8}_t}} {\cf2{freqIndex}}{\cf11{);}}}\par\pard
+\cbpat1{{\cf2{}}}\par\pard
+\cbpat1{{\cf2{}}}\par\pard
+\cbpat1{{\cf2{}}{\cf6{/*---------------------------- Module Variables ---------------------------*/}}{\cf2{}}}\par\pard
+\cbpat1{{\cf2{}}{\cf5{// with the introduction of Gen{2}, we need a module level Priority variable}}}\par\pard
+\cbpat1{{\cf2{}}{\cf16{static uint{8}_t}} {\cf2{MyPriority}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{}}}\par\pard
+\cbpat1{{\cf2{}}{\cf5{// Shared with ISR (these variables need to be of the volatile datatype)}}}\par\pard
+\cbpat1{{\cf2{}}{\cf16{static}} {\cf2{}}{\cf17{volatile}} {\cf2{}}{\cf16{uint{1}{6}_t}} {\cf2{CurrentPeriod}} {\cf11{=}} {\cf2{}}{\cf4{{0}}}{\cf2{}}{\cf11{;}}     }\par\pard
+\cbpat1{{\cf2{}}{\cf16{static}} {\cf2{}}{\cf17{volatile}} {\cf2{}}{\cf16{uint{1}{6}_t}} {\cf2{LastCapture}} {\cf11{=}} {\cf2{}}{\cf4{{0}}}{\cf2{}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{}}}\par\pard
+\cbpat1{{\cf2{}}{\cf16{static uint{8}_t}} {\cf2{CurrentFreqIndex}} {\cf11{=}} {\cf2{}}{\cf4{{0}}}{\cf2{}}{\cf11{;}}            {\cf2{}}{\cf5{// Start at {2}{5}{0} Hz}}}\par\pard
+\cbpat1{{\cf2{}}{\cf16{static uint{1}{6}_t}} {\cf2{CurrentPWMPeriod}} {\cf11{=}} {\cf2{}}{\cf4{{1}{9}{9}{9}{9}}}{\cf2{}}{\cf11{;}}       {\cf2{}}{\cf5{// PR{2} value for current frequency}}}\par\pard
+\cbpat1{{\cf2{}}}\par\pard
+\cbpat1{{\cf2{}}{\cf16{static uint{3}{2}_t}} {\cf2{LastADCValue}} {\cf11{=}} {\cf2{}}{\cf4{{0}}}{\cf2{}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{}}}\par\pard
+\cbpat1{{\cf2{}}}\par\pard
+\cbpat1{{\cf2{}}}\par\pard
+\cbpat1{{\cf2{}}{\cf6{/*------------------------------ Module Code ------------------------------*/}}{\cf2{}}}\par\pard
+\cbpat1{{\cf2{}}{\cf6{/****************************************************************************}}}\par\pard
+\cbpat1{{\cf6{ Function}}}\par\pard
+\cbpat1{{\cf6{     InitMotorService}}}\par\pard
+\cbpat1{{\cf6{}}}\par\pard
+\cbpat1{{\cf6{ Parameters}}}\par\pard
+\cbpat1{{\cf6{     uint{8}_t : the priorty of this service}}}\par\pard
+\cbpat1{{\cf6{}}}\par\pard
+\cbpat1{{\cf6{ Returns}}}\par\pard
+\cbpat1{{\cf6{     bool, false if error in initialization, true otherwise}}}\par\pard
+\cbpat1{{\cf6{}}}\par\pard
+\cbpat1{{\cf6{ Description}}}\par\pard
+\cbpat1{{\cf6{     Saves away the priority, and Initializes PWM, ADC, direction pins, and starts the periodic timer}}}\par\pard
+\cbpat1{{\cf6{ Notes}}}\par\pard
+\cbpat1{{\cf6{}}}\par\pard
+\cbpat1{{\cf6{ Author}}}\par\pard
+\cbpat1{{\cf6{     J. Edward Carryer, {0}{1}/{1}{6}/{1}{2}, {1}{0}:{0}{0}}}}\par\pard
+\cbpat1{{\cf6{****************************************************************************/}}{\cf2{}}}\par\pard
+\cbpat1{{\cf2{}}{\cf16{bool}} {\cf2{}}{\cf17{InitMotorService}}{\cf2{}}{\cf11{(}}{\cf2{}}{\cf16{uint{8}_t}} {\cf2{Priority}}{\cf11{)}}}\par\pard
+\cbpat1{{\cf2{}}{\cf11{\{}}}\par\pard
+\cbpat1{{\cf2{  ES_Event_t ThisEvent}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{}}}\par\pard
+\cbpat1{{\cf2{  MyPriority}} {\cf11{=}} {\cf2{Priority}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{}}  {\cf6{/********************************************}}}\par\pard
+\cbpat1{{\cf6{   in here you write your initialization code}}}\par\pard
+\cbpat1{{\cf6{   *******************************************/}}{\cf2{}}}\par\pard
+\cbpat1{{\cf2{}}  }\par\pard
+\cbpat1{{\cf2{}}   {\cf5{// Initialize direction control pins}}}\par\pard
+\cbpat1{{\cf2{}}    {\cf17{InitDirectionPWMPins}}{\cf2{}}{\cf11{();}}}\par\pard
+\cbpat1{{\cf2{}}    }\par\pard
+\cbpat1{{\cf2{}}    }\par\pard
+\cbpat1{{\cf2{}}    {\cf17{ADC_ConfigAutoScan}}{\cf2{}}{\cf11{(}}{\cf2{BIT{0}HI}}{\cf11{);}}}\par\pard
+\cbpat1{{\cf2{}}    }\par\pard
+\cbpat1{{\cf2{}}    {\cf5{// Initialize PWM using OC{4} and Timer{2}}}}\par\pard
+\cbpat1{{\cf2{}}    {\cf17{InitPWM}}{\cf2{}}{\cf11{();}}}\par\pard
+\cbpat1{{\cf2{}}    }\par\pard
+\cbpat1{{\cf2{}}    {\cf5{// Initialize bar graph output pins}}}\par\pard
+\cbpat1{{\cf2{}}    {\cf17{InitBarGraphTimingPins}}{\cf2{}}{\cf11{();}}}\par\pard
+\cbpat1{{\cf2{}}    }\par\pard
+\cbpat1{{\cf2{}}    {\cf5{// Initialize input capture for encoder}}}\par\pard
+\cbpat1{{\cf2{}}    {\cf17{InitInputCapture}}{\cf2{}}{\cf11{();}}}\par\pard
+\cbpat1{{\cf2{}}    }\par\pard
+\cbpat1{{\cf2{}}    {\cf17{DB_printf}}{\cf2{}}{\cf11{(}}{\cf2{}}{\cf3{"Press '{1}'-'{6}' to change PWM frequency:}}{\cf7{\\r\\n}}{\cf3{"}}{\cf2{}}{\cf11{);}}}\par\pard
+\cbpat1{{\cf2{}}    {\cf17{DB_printf}}{\cf2{}}{\cf11{(}}{\cf2{}}{\cf3{"  {1}={2}{5}{0}Hz  {2}={5}{0}{0}Hz  {3}={1}kHz}}{\cf7{\\r\\n}}{\cf3{"}}{\cf2{}}{\cf11{);}}}\par\pard
+\cbpat1{{\cf2{}}    {\cf17{DB_printf}}{\cf2{}}{\cf11{(}}{\cf2{}}{\cf3{"  {4}={2}kHz   {5}={5}kHz   {6}={1}{0}kHz}}{\cf7{\\r\\n}}{\cf3{"}}{\cf2{}}{\cf11{);}}}\par\pard
+\cbpat1{{\cf2{}}    {\cf17{DB_printf}}{\cf2{}}{\cf11{(}}{\cf2{}}{\cf3{"Current:}} {\cf12{%s}}{\cf3{}}{\cf7{\\r\\n\\n}}{\cf3{"}}{\cf2{}}{\cf11{,}} {\cf2{FREQ_LABELS}}{\cf11{[}}{\cf2{CurrentFreqIndex}}{\cf11{]);}}}\par\pard
+\cbpat1{{\cf2{}}    }\par\pard
+\cbpat1{{\cf2{}}    }\par\pard
+\cbpat1{{\cf2{}}    {\cf5{// Start the periodic ADC read timer ({1}{0} Hz)}}}\par\pard
+\cbpat1{{\cf2{}}    {\cf17{ES_Timer_InitTimer}}{\cf2{}}{\cf11{(}}{\cf2{MOTOR_TIMER}}{\cf11{,}} {\cf2{ADC_UPDATE_TIME}}{\cf11{);}}}\par\pard
+\cbpat1{{\cf2{}}    }\par\pard
+\cbpat1{{\cf2{}}  {\cf5{// post the initial transition event}}}\par\pard
+\cbpat1{{\cf2{  ThisEvent}}{\cf11{.}}{\cf2{EventType}} {\cf11{=}} {\cf2{ES_INIT}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{}}  {\cf15{if}} {\cf2{}}{\cf11{(}}{\cf2{}}{\cf17{ES_PostToService}}{\cf2{}}{\cf11{(}}{\cf2{MyPriority}}{\cf11{,}} {\cf2{ThisEvent}}{\cf11{) ==}} {\cf2{}}{\cf15{true}}{\cf2{}}{\cf11{)}}}\par\pard
+\cbpat1{{\cf2{}}  {\cf11{\{}}}\par\pard
+\cbpat1{{\cf2{}}    {\cf15{return true}}{\cf2{}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{}}  {\cf11{\}}}}\par\pard
+\cbpat1{{\cf2{}}  {\cf15{else}}}\par\pard
+\cbpat1{{\cf2{}}  {\cf11{\{}}}\par\pard
+\cbpat1{{\cf2{}}    {\cf15{return false}}{\cf2{}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{}}  {\cf11{\}}}}\par\pard
+\cbpat1{{\cf2{}}{\cf11{\}}}}\par\pard
+\cbpat1{{\cf2{}}}\par\pard
+\cbpat1{{\cf2{}}{\cf6{/****************************************************************************}}}\par\pard
+\cbpat1{{\cf6{ Function}}}\par\pard
+\cbpat1{{\cf6{     PostMotorService}}}\par\pard
+\cbpat1{{\cf6{}}}\par\pard
+\cbpat1{{\cf6{ Parameters}}}\par\pard
+\cbpat1{{\cf6{     EF_Event_t ThisEvent ,the event to post to the queue}}}\par\pard
+\cbpat1{{\cf6{}}}\par\pard
+\cbpat1{{\cf6{ Returns}}}\par\pard
+\cbpat1{{\cf6{     bool false if the Enqueue operation failed, true otherwise}}}\par\pard
+\cbpat1{{\cf6{}}}\par\pard
+\cbpat1{{\cf6{ Description}}}\par\pard
+\cbpat1{{\cf6{     Posts an event to this state machine's queue}}}\par\pard
+\cbpat1{{\cf6{ Notes}}}\par\pard
+\cbpat1{{\cf6{}}}\par\pard
+\cbpat1{{\cf6{ Author}}}\par\pard
+\cbpat1{{\cf6{     J. Edward Carryer, {1}{0}/{2}{3}/{1}{1}, {1}{9}:{2}{5}}}}\par\pard
+\cbpat1{{\cf6{****************************************************************************/}}{\cf2{}}}\par\pard
+\cbpat1{{\cf2{}}{\cf16{bool}} {\cf2{}}{\cf17{PostMotorService}}{\cf2{}}{\cf11{(}}{\cf2{ES_Event_t ThisEvent}}{\cf11{)}}}\par\pard
+\cbpat1{{\cf2{}}{\cf11{\{}}}\par\pard
+\cbpat1{{\cf2{}}  {\cf15{return}} {\cf2{}}{\cf17{ES_PostToService}}{\cf2{}}{\cf11{(}}{\cf2{MyPriority}}{\cf11{,}} {\cf2{ThisEvent}}{\cf11{);}}}\par\pard
+\cbpat1{{\cf2{}}{\cf11{\}}}}\par\pard
+\cbpat1{{\cf2{}}}\par\pard
+\cbpat1{{\cf2{}}{\cf6{/****************************************************************************}}}\par\pard
+\cbpat1{{\cf6{ Function}}}\par\pard
+\cbpat1{{\cf6{    RunMotorService}}}\par\pard
+\cbpat1{{\cf6{}}}\par\pard
+\cbpat1{{\cf6{ Parameters}}}\par\pard
+\cbpat1{{\cf6{   ES_Event_t : the event to process}}}\par\pard
+\cbpat1{{\cf6{}}}\par\pard
+\cbpat1{{\cf6{ Returns}}}\par\pard
+\cbpat1{{\cf6{   ES_Event, ES_NO_EVENT if no error ES_ERROR otherwise}}}\par\pard
+\cbpat1{{\cf6{}}}\par\pard
+\cbpat1{{\cf6{ Description}}}\par\pard
+\cbpat1{{\cf6{   add your description here}}}\par\pard
+\cbpat1{{\cf6{ Notes}}}\par\pard
+\cbpat1{{\cf6{}}}\par\pard
+\cbpat1{{\cf6{ Author}}}\par\pard
+\cbpat1{{\cf6{   J. Edward Carryer, {0}{1}/{1}{5}/{1}{2}, {1}{5}:{2}{3}}}}\par\pard
+\cbpat1{{\cf6{****************************************************************************/}}{\cf2{}}}\par\pard
+\cbpat1{{\cf2{ES_Event_t}} {\cf17{RunMotorService}}{\cf2{}}{\cf11{(}}{\cf2{ES_Event_t ThisEvent}}{\cf11{)}}}\par\pard
+\cbpat1{{\cf2{}}{\cf11{\{}}}\par\pard
+\cbpat1{{\cf2{  ES_Event_t ReturnEvent}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{  ReturnEvent}}{\cf11{.}}{\cf2{EventType}} {\cf11{=}} {\cf2{ES_NO_EVENT}}{\cf11{;}} {\cf2{}}{\cf5{// assume no errors}}}\par\pard
+\cbpat1{{\cf2{}}  {\cf6{/********************************************}}}\par\pard
+\cbpat1{{\cf6{   in here you write your service code}}}\par\pard
+\cbpat1{{\cf6{   *******************************************/}}{\cf2{}}}\par\pard
+\cbpat1{{\cf2{}}  {\cf15{switch}} {\cf2{}}{\cf11{(}}{\cf2{ThisEvent}}{\cf11{.}}{\cf2{EventType}}{\cf11{)}}}\par\pard
+\cbpat1{{\cf2{}}    {\cf11{\{}}}\par\pard
+\cbpat1{{\cf2{}}        {\cf15{case}} {\cf2{ES_NEW_KEY}}{\cf11{:}}}\par\pard
+\cbpat1{{\cf2{}}            {\cf5{// Part {3}: Handle frequency change via keyboard}}}\par\pard
+\cbpat1{{\cf2{}}            {\cf11{\{}}}\par\pard
+\cbpat1{{\cf2{}}                {\cf16{char}} {\cf2{key}} {\cf11{= (}}{\cf2{}}{\cf16{char}}{\cf2{}}{\cf11{)}}{\cf2{ThisEvent}}{\cf11{.}}{\cf2{EventParam}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{}}                }\par\pard
+\cbpat1{{\cf2{}}                {\cf5{// Check for keys '{1}' through '{6}'}}}\par\pard
+\cbpat1{{\cf2{}}                {\cf15{if}} {\cf2{}}{\cf11{(}}{\cf2{key}} {\cf11{>=}} {\cf2{}}{\cf3{'{1}'}}{\cf2{}} {\cf11{&&}} {\cf2{key}} {\cf11{<=}} {\cf2{}}{\cf3{'{6}'}}{\cf2{}}{\cf11{)}}}\par\pard
+\cbpat1{{\cf2{}}                {\cf11{\{}}}\par\pard
+\cbpat1{{\cf2{}}                    {\cf16{uint{8}_t}} {\cf2{newIndex}} {\cf11{=}} {\cf2{key}} {\cf11{-}} {\cf2{}}{\cf3{'{1}'}}{\cf2{}}{\cf11{;}}  {\cf2{}}{\cf5{// Convert '{1}'-'{6}' to {0}-{5}}}}\par\pard
+\cbpat1{{\cf2{}}                    {\cf17{SetPWMFrequency}}{\cf2{}}{\cf11{(}}{\cf2{newIndex}}{\cf11{);}}}\par\pard
+\cbpat1{{\cf2{}}                    }\par\pard
+\cbpat1{{\cf2{}}                    {\cf17{DB_printf}}{\cf2{}}{\cf11{(}}{\cf2{}}{\cf3{"}}{\cf7{\\r\\n}}{\cf3{>>> PWM Frequency changed to:}} {\cf12{%s}} {\cf3{<<<}}{\cf7{\\r\\n\\n}}{\cf3{"}}{\cf2{}}{\cf11{,}} }\par\pard
+\cbpat1{{\cf2{                              FREQ_LABELS}}{\cf11{[}}{\cf2{CurrentFreqIndex}}{\cf11{]);}}}\par\pard
+\cbpat1{{\cf2{}}                {\cf11{\}}}}\par\pard
+\cbpat1{{\cf2{}}            {\cf11{\}}}}\par\pard
+\cbpat1{{\cf2{}}            {\cf15{break}}{\cf2{}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{}}            }\par\pard
+\cbpat1{{\cf2{}}            }\par\pard
+\cbpat1{{\cf2{}}            }\par\pard
+\cbpat1{{\cf2{}}        {\cf15{case}} {\cf2{ES_TIMEOUT}}{\cf11{:}}}\par\pard
+\cbpat1{{\cf2{}}            {\cf15{if}} {\cf2{}}{\cf11{(}}{\cf2{ThisEvent}}{\cf11{.}}{\cf2{EventParam}} {\cf11{==}} {\cf2{MOTOR_TIMER}}{\cf11{)}}}\par\pard
+\cbpat1{{\cf2{}}            {\cf11{\{}}}\par\pard
+\cbpat1{{\cf2{}}                {\cf5{// Read potentiometer value from ADC}}}\par\pard
+\cbpat1{{\cf2{}}                {\cf16{uint{3}{2}_t}} {\cf2{adcResult}}{\cf11{[}}{\cf2{}}{\cf4{{1}}}{\cf2{}}{\cf11{];}}}\par\pard
+\cbpat1{{\cf2{}}                {\cf17{ADC_MultiRead}}{\cf2{}}{\cf11{(}}{\cf2{adcResult}}{\cf11{);}}}\par\pard
+\cbpat1{{\cf2{                LastADCValue}} {\cf11{=}} {\cf2{adcResult}}{\cf11{[}}{\cf2{}}{\cf4{{0}}}{\cf2{}}{\cf11{];}}}\par\pard
+\cbpat1{{\cf2{}}                }\par\pard
+\cbpat1{{\cf2{}}                }\par\pard
+\cbpat1{{\cf2{}}                {\cf5{// Scale ADC value ({0}-{1}{0}{2}{3}) to duty cycle ({0}-PWM_PERIOD)}}}\par\pard
+\cbpat1{{\cf2{}}                {\cf16{uint{3}{2}_t}} {\cf2{newDutyCycle}} {\cf11{= (}}{\cf2{adcResult}}{\cf11{[}}{\cf2{}}{\cf4{{0}}}{\cf2{}}{\cf11{] *}} {\cf2{CurrentPWMPeriod}}{\cf11{) /}} {\cf2{}}{\cf4{{1}{0}{2}{3}}}{\cf2{}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{}}                }\par\pard
+\cbpat1{{\cf2{}}                {\cf5{// Update PWM duty cycle}}}\par\pard
+\cbpat1{{\cf2{}}                {\cf17{SetDutyCycle}}{\cf2{}}{\cf11{(}}{\cf2{newDutyCycle}}{\cf11{);}}}\par\pard
+\cbpat1{{\cf2{}}                {\cf5{// Update bar graph }}}\par\pard
+\cbpat1{{\cf2{}}                {\cf17{__builtin_disable_interrupts}}{\cf2{}}{\cf11{();}}}\par\pard
+\cbpat1{{\cf2{}}                {\cf16{uint{1}{6}_t}} {\cf2{periodSnapshot}} {\cf11{=}} {\cf2{CurrentPeriod}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{}}                 {\cf17{__builtin_enable_interrupts}}{\cf2{}}{\cf11{();}}}\par\pard
+\cbpat1{{\cf2{}}}\par\pard
+\cbpat1{{\cf2{}}                {\cf5{// Update bar graph with the snapshot}}}\par\pard
+\cbpat1{{\cf2{}}                {\cf17{UpdateBarGraph}}{\cf2{}}{\cf11{(}}{\cf2{periodSnapshot}}{\cf11{);}}}\par\pard
+\cbpat1{{\cf2{}}}\par\pard
+\cbpat1{{\cf2{}}                {\cf5{// Print period for debugging}}}\par\pard
+\cbpat1{{\cf2{}}{\cf5{//                DB_printf("Period: %d\\r\\n", periodSnapshot);}}}\par\pard
+\cbpat1{{\cf2{}}                }\par\pard
+\cbpat1{{\cf2{}}                {\cf5{// Raise timing pin before RPM calculation}}}\par\pard
+\cbpat1{{\cf2{}}{\cf5{//                TIMING_PIN = {1};}}}\par\pard
+\cbpat1{{\cf2{}}                }\par\pard
+\cbpat1{{\cf2{}}                {\cf15{if}} {\cf2{}}{\cf11{(}}{\cf2{periodSnapshot}} {\cf11{>}} {\cf2{}}{\cf4{{0}}}{\cf2{}}{\cf11{)}}}\par\pard
+\cbpat1{{\cf2{}}                {\cf11{\{}}}\par\pard
+\cbpat1{{\cf2{}}                    {\cf16{uint{3}{2}_t}} {\cf2{wheelRPM}} {\cf11{=}} {\cf2{RPM_NUMERATOR}} {\cf11{/}} {\cf2{periodSnapshot}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{}}                    }\par\pard
+\cbpat1{{\cf2{}}                    {\cf5{// Lower timing pin after calculation ---> step {2}.{5}}}}\par\pard
+\cbpat1{{\cf2{}}{\cf5{//                    TIMING_PIN = {0};}}}\par\pard
+\cbpat1{{\cf2{}}                    }\par\pard
+\cbpat1{{\cf2{}}                    {\cf5{// Raise timing pin before printf (Part {2}.{6})}}}\par\pard
+\cbpat1{{\cf2{}}{\cf5{//                    TIMING_PIN = {1};}}}\par\pard
+\cbpat1{{\cf2{}}                    {\cf17{DB_printf}}{\cf2{}}{\cf11{(}}{\cf2{}}{\cf3{"}}{\cf7{\\r}}{\cf3{[}}{\cf12{%s}}{\cf3{] RPM:}} {\cf12{%d}}  {\cf3{Period:}} {\cf12{%d}}  {\cf3{DC:}} {\cf12{%d}}{\cf3{%%"}}{\cf2{}}{\cf11{,}} }\par\pard
+\cbpat1{{\cf2{                              FREQ_LABELS}}{\cf11{[}}{\cf2{CurrentFreqIndex}}{\cf11{],}}}\par\pard
+\cbpat1{{\cf2{                              wheelRPM}}{\cf11{,}} }\par\pard
+\cbpat1{{\cf2{                              periodSnapshot}}{\cf11{,}}}\par\pard
+\cbpat1{{\cf2{}}                              {\cf11{(}}{\cf2{adcResult}}{\cf11{[}}{\cf2{}}{\cf4{{0}}}{\cf2{}}{\cf11{] *}} {\cf2{}}{\cf4{{1}{0}{0}}}{\cf2{}}{\cf11{) /}} {\cf2{}}{\cf4{{1}{0}{2}{3}}}{\cf2{}}{\cf11{);}}}\par\pard
+\cbpat1{{\cf2{}}                    }\par\pard
+\cbpat1{{\cf2{}}                    }\par\pard
+\cbpat1{{\cf2{}}                    {\cf5{// Lower timing pin after printf (Part {2}.{6})}}}\par\pard
+\cbpat1{{\cf2{}}{\cf5{//                    TIMING_PIN = {0};}}}\par\pard
+\cbpat1{{\cf2{}}                {\cf11{\}}}}\par\pard
+\cbpat1{{\cf2{}}                {\cf15{else}}}\par\pard
+\cbpat1{{\cf2{}}                {\cf11{\{}}}\par\pard
+\cbpat1{{\cf2{}}{\cf5{//                    TIMING_PIN = {0};}}}\par\pard
+\cbpat1{{\cf2{}}                    {\cf17{DB_printf}}{\cf2{}}{\cf11{(}}{\cf2{}}{\cf3{"}}{\cf7{\\r}}{\cf3{[}}{\cf12{%s}}{\cf3{] RPM: ----  Period: -----  DC:}} {\cf12{%d}}{\cf3{%%"}}{\cf2{}}{\cf11{,}}}\par\pard
+\cbpat1{{\cf2{                              FREQ_LABELS}}{\cf11{[}}{\cf2{CurrentFreqIndex}}{\cf11{],}}}\par\pard
+\cbpat1{{\cf2{}}                              {\cf11{(}}{\cf2{adcResult}}{\cf11{[}}{\cf2{}}{\cf4{{0}}}{\cf2{}}{\cf11{] *}} {\cf2{}}{\cf4{{1}{0}{0}}}{\cf2{}}{\cf11{) /}} {\cf2{}}{\cf4{{1}{0}{2}{3}}}{\cf2{}}{\cf11{);}}}\par\pard
+\cbpat1{{\cf2{}}                {\cf11{\}}}}\par\pard
+\cbpat1{{\cf2{}}                {\cf5{// Restart timer for next reading}}}\par\pard
+\cbpat1{{\cf2{}}                }\par\pard
+\cbpat1{{\cf2{}}                {\cf17{ES_Timer_InitTimer}}{\cf2{}}{\cf11{(}}{\cf2{MOTOR_TIMER}}{\cf11{,}} {\cf2{ADC_UPDATE_TIME}}{\cf11{);}}}\par\pard
+\cbpat1{{\cf2{}}            {\cf11{\}}}}\par\pard
+\cbpat1{{\cf2{}}           }\par\pard
+\cbpat1{{\cf2{}}            {\cf15{break}}{\cf2{}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{}}            }\par\pard
+\cbpat1{{\cf2{}}        {\cf15{case}} {\cf2{ES_INIT}}{\cf11{:}}}\par\pard
+\cbpat1{{\cf2{}}            {\cf5{// Initialization complete - nothing special needed}}}\par\pard
+\cbpat1{{\cf2{}}            {\cf15{break}}{\cf2{}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{}}            }\par\pard
+\cbpat1{{\cf2{}}        {\cf15{default}}{\cf2{}}{\cf11{:}}}\par\pard
+\cbpat1{{\cf2{}}            {\cf15{break}}{\cf2{}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{}}    {\cf11{\}}}}\par\pard
+\cbpat1{{\cf2{}}  {\cf15{return}} {\cf2{ReturnEvent}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{}}{\cf11{\}}}}\par\pard
+\cbpat1{{\cf2{}}{\cf6{/***************************************************************************}}}\par\pard
+\cbpat1{{\cf6{ ISR's}}}\par\pard
+\cbpat1{{\cf6{ ***************************************************************************/}}{\cf2{}}}\par\pard
+\cbpat1{{\cf2{}}{\cf16{void}} {\cf2{}}{\cf17{__ISR}}{\cf2{}}{\cf11{(}}{\cf2{_INPUT_CAPTURE_{2}_VECTOR}}{\cf11{,}} {\cf2{IPL{6}AUTO}}{\cf11{)}} {\cf2{}}{\cf17{IC{2}_ISR}}{\cf2{}}{\cf11{(}}{\cf2{}}{\cf16{void}}{\cf2{}}{\cf11{)\{}}}\par\pard
+\cbpat1{{\cf2{}}    }\par\pard
+\cbpat1{{\cf2{}}    {\cf16{uint{1}{6}_t}} {\cf2{ThisCapture}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{}}    }\par\pard
+\cbpat1{{\cf2{}}    {\cf5{// Drain the FIFO - read ALL buffered captures, keep only the last one}}}\par\pard
+\cbpat1{{\cf2{}}    {\cf5{// ICBNE = {1} means buffer is not empty}}}\par\pard
+\cbpat1{{\cf2{}}    {\cf15{while}} {\cf2{}}{\cf11{(}}{\cf2{IC{2}CONbits}}{\cf11{.}}{\cf2{ICBNE}}{\cf11{) \{}}}\par\pard
+\cbpat1{{\cf2{        ThisCapture}} {\cf11{=}} {\cf2{IC{2}BUF}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{}}    {\cf11{\}}}}\par\pard
+\cbpat1{{\cf2{}}    }\par\pard
+\cbpat1{{\cf2{}}    {\cf5{// Calculate period (unsigned subtraction handles {1}{6}-bit rollover)}}}\par\pard
+\cbpat1{{\cf2{    CurrentPeriod}} {\cf11{=}} {\cf2{ThisCapture}} {\cf11{-}} {\cf2{LastCapture}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{}}    }\par\pard
+\cbpat1{{\cf2{}}    {\cf5{// Save for next edge}}}\par\pard
+\cbpat1{{\cf2{    LastCapture}} {\cf11{=}} {\cf2{ThisCapture}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{}}    }\par\pard
+\cbpat1{{\cf2{}}    {\cf5{// Clear interrupt flag AFTER reading buffer}}}\par\pard
+\cbpat1{{\cf2{    IFS{0}CLR}} {\cf11{=}} {\cf2{_IFS{0}_IC{2}IF_MASK}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{}}    }\par\pard
+\cbpat1{{\cf2{}}    {\cf5{// Post event to service to trigger bar graph update}}}\par\pard
+\cbpat1{{\cf2{}}{\cf5{//    DB_printf("%d\\r\\n",LastCapture); }}}\par\pard
+\cbpat1{{\cf2{}}{\cf5{//    ES_Event_t NewEvent;}}}\par\pard
+\cbpat1{{\cf2{}}{\cf5{//    NewEvent.EventType = ES_NEW_EDGE;}}}\par\pard
+\cbpat1{{\cf2{}}{\cf5{//    PostMotorService(NewEvent);}}}\par\pard
+\cbpat1{{\cf2{}}}\par\pard
+\cbpat1{{\cf2{}}{\cf11{\}}}}\par\pard
+\cbpat1{{\cf2{}}{\cf6{/***************************************************************************}}}\par\pard
+\cbpat1{{\cf6{ private functions}}}\par\pard
+\cbpat1{{\cf6{ ***************************************************************************/}}{\cf2{}}}\par\pard
+\cbpat1{{\cf2{}}}\par\pard
+\cbpat1{{\cf2{}}{\cf16{static void}} {\cf2{}}{\cf17{SetPWMFrequency}}{\cf2{}}{\cf11{(}}{\cf2{}}{\cf16{uint{8}_t}} {\cf2{freqIndex}}{\cf11{)}}}\par\pard
+\cbpat1{{\cf2{}}{\cf11{\{}}}\par\pard
+\cbpat1{{\cf2{}}    {\cf15{if}} {\cf2{}}{\cf11{(}}{\cf2{freqIndex}} {\cf11{>=}} {\cf2{NUM_FREQUENCIES}}{\cf11{)}}}\par\pard
+\cbpat1{{\cf2{}}    {\cf11{\{}}}\par\pard
+\cbpat1{{\cf2{}}        {\cf15{return}}{\cf2{}}{\cf11{;}}  {\cf2{}}{\cf5{// Invalid index}}}\par\pard
+\cbpat1{{\cf2{}}    {\cf11{\}}}}\par\pard
+\cbpat1{{\cf2{}}    }\par\pard
+\cbpat1{{\cf2{}}    {\cf5{// Update tracking variables}}}\par\pard
+\cbpat1{{\cf2{    CurrentFreqIndex}} {\cf11{=}} {\cf2{freqIndex}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{    CurrentPWMPeriod}} {\cf11{=}} {\cf2{PWM_PERIODS}}{\cf11{[}}{\cf2{freqIndex}}{\cf11{];}}}\par\pard
+\cbpat1{{\cf2{}}    }\par\pard
+\cbpat1{{\cf2{}}    {\cf5{// Briefly disable Timer{2} while changing period}}}\par\pard
+\cbpat1{{\cf2{    T{2}CONbits}}{\cf11{.}}{\cf2{ON}} {\cf11{=}} {\cf2{}}{\cf4{{0}}}{\cf2{}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{}}    }\par\pard
+\cbpat1{{\cf2{}}    {\cf5{// Update period register}}}\par\pard
+\cbpat1{{\cf2{    PR{2}}} {\cf11{=}} {\cf2{CurrentPWMPeriod}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{}}    }\par\pard
+\cbpat1{{\cf2{}}    {\cf5{// Clear timer to avoid glitches}}}\par\pard
+\cbpat1{{\cf2{    TMR{2}}} {\cf11{=}} {\cf2{}}{\cf4{{0}}}{\cf2{}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{}}    }\par\pard
+\cbpat1{{\cf2{}}    {\cf5{// Recalculate duty cycle to maintain same percentage}}}\par\pard
+\cbpat1{{\cf2{}}    {\cf16{uint{3}{2}_t}} {\cf2{newDutyCycle}} {\cf11{= (}}{\cf2{LastADCValue}} {\cf11{*}} {\cf2{CurrentPWMPeriod}}{\cf11{) /}} {\cf2{}}{\cf4{{1}{0}{2}{3}}}{\cf2{}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{    OC{4}RS}} {\cf11{=}} {\cf2{newDutyCycle}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{    OC{4}R}} {\cf11{=}} {\cf2{newDutyCycle}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{}}    }\par\pard
+\cbpat1{{\cf2{}}    {\cf5{// Re-enable Timer{2}}}}\par\pard
+\cbpat1{{\cf2{    T{2}CONbits}}{\cf11{.}}{\cf2{ON}} {\cf11{=}} {\cf2{}}{\cf4{{1}}}{\cf2{}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{}}{\cf11{\}}}}\par\pard
+\cbpat1{{\cf2{}}}\par\pard
+\cbpat1{{\cf2{}}{\cf16{static void}} {\cf2{}}{\cf17{InitDirectionPWMPins}}{\cf2{}}{\cf11{(}}{\cf2{}}{\cf16{void}}{\cf2{}}{\cf11{)}}}\par\pard
+\cbpat1{{\cf2{}}{\cf11{\{}}}\par\pard
+\cbpat1{{\cf2{}}    {\cf5{// Disable analog function on RB{2} and RB{3} and RB{1}{3} (they are AN{4} and AN{5})}}}\par\pard
+\cbpat1{{\cf2{    DIR_{1}A_ANSEL}} {\cf11{=}} {\cf2{}}{\cf4{{0}}}{\cf2{}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{    DIR_{2}A_ANSEL}} {\cf11{=}} {\cf2{}}{\cf4{{0}}}{\cf2{}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{    PWM_PIN_ANSEL}} {\cf11{=}} {\cf2{}}{\cf4{{0}}}{\cf2{}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{}}    }\par\pard
+\cbpat1{{\cf2{}}    {\cf5{// Set RB{2} and RB{3} and RB{1}{3} as outputs}}}\par\pard
+\cbpat1{{\cf2{    DIR_{1}A_TRIS}} {\cf11{=}} {\cf2{}}{\cf4{{0}}}{\cf2{}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{    DIR_{2}A_TRIS}} {\cf11{=}} {\cf2{}}{\cf4{{0}}}{\cf2{}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{    PWM_PIN_TRIS}} {\cf11{=}} {\cf2{}}{\cf4{{0}}}{\cf2{}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{}}    }\par\pard
+\cbpat1{{\cf2{}}    {\cf5{// Set initial direction }}}\par\pard
+\cbpat1{{\cf2{    DIR_{1}A}} {\cf11{=}} {\cf2{}}{\cf4{{1}}}{\cf2{}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{    DIR_{2}A}} {\cf11{=}} {\cf2{}}{\cf4{{0}}}{\cf2{}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{}}{\cf11{\}}}}\par\pard
+\cbpat1{{\cf2{}}}\par\pard
+\cbpat1{{\cf2{}}{\cf16{static void}} {\cf2{}}{\cf17{InitPWM}}{\cf2{}}{\cf11{(}}{\cf2{}}{\cf16{void}}{\cf2{}}{\cf11{)}}}\par\pard
+\cbpat1{{\cf2{}}{\cf11{\{}}}\par\pard
+\cbpat1{{\cf2{}}    {\cf5{// ===== Timer{2} Setup =====}}}\par\pard
+\cbpat1{{\cf2{}}    }\par\pard
+\cbpat1{{\cf2{    T{2}CONbits}}{\cf11{.}}{\cf2{ON}} {\cf11{=}} {\cf2{}}{\cf4{{0}}}{\cf2{}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{}}   }\par\pard
+\cbpat1{{\cf2{    T{2}CONbits}}{\cf11{.}}{\cf2{TCS}} {\cf11{=}} {\cf2{}}{\cf4{{0}}}{\cf2{}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{}}    }\par\pard
+\cbpat1{{\cf2{}}    {\cf5{// Select prescaler ({1}:{4})}}}\par\pard
+\cbpat1{{\cf2{    T{2}CONbits}}{\cf11{.}}{\cf2{TCKPS}} {\cf11{=}} {\cf2{PWM_PRESCALE}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{}}    }\par\pard
+\cbpat1{{\cf2{    TMR{2}}} {\cf11{=}} {\cf2{}}{\cf4{{0}}}{\cf2{}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{}}    }\par\pard
+\cbpat1{{\cf2{    PR{2}}} {\cf11{=}} {\cf2{CurrentPWMPeriod}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{}}    }\par\pard
+\cbpat1{{\cf2{}}{\cf5{//    IFS{0}CLR = _IFS{0}_T{2}IF_MASK;}}}\par\pard
+\cbpat1{{\cf2{}}    {\cf5{//Enable Timer{2}}}}\par\pard
+\cbpat1{{\cf2{    T{2}CONbits}}{\cf11{.}}{\cf2{ON}} {\cf11{=}} {\cf2{}}{\cf4{{1}}}{\cf2{}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{}}    {\cf5{// ===== Output Compare {4} Setup =====}}}\par\pard
+\cbpat1{{\cf2{}}    }\par\pard
+\cbpat1{{\cf2{    OC{4}CONbits}}{\cf11{.}}{\cf2{ON}} {\cf11{=}} {\cf2{}}{\cf4{{0}}}{\cf2{}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{}}    }\par\pard
+\cbpat1{{\cf2{}}    {\cf5{// Set initial duty cycle ({0}% - motor stopped)}}}\par\pard
+\cbpat1{{\cf2{    OC{4}R}} {\cf11{=}} {\cf2{}}{\cf4{{0}}}{\cf2{}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{    OC{4}RS}} {\cf11{=}} {\cf2{}}{\cf4{{0}}}{\cf2{}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{}}    }\par\pard
+\cbpat1{{\cf2{}}    {\cf5{// Map OC{4} output to RB{1}{3} (pin {2}{4})}}}\par\pard
+\cbpat1{{\cf2{}}    }\par\pard
+\cbpat1{{\cf2{}}    }\par\pard
+\cbpat1{{\cf2{}}    {\cf5{// Configure OC{4} for PWM mode}}}\par\pard
+\cbpat1{{\cf2{    OC{4}CONbits}}{\cf11{.}}{\cf2{OCTSEL}} {\cf11{=}} {\cf2{}}{\cf4{{0}}}{\cf2{}}{\cf11{;}}      {\cf2{}}{\cf5{// Use Timer{2} as clock source}}}\par\pard
+\cbpat1{{\cf2{    OC{4}CONbits}}{\cf11{.}}{\cf2{OCM}} {\cf11{=}} {\cf2{}}{\cf4{{0}b{1}{1}{0}}}{\cf2{}}{\cf11{;}}     {\cf2{}}{\cf5{// PWM mode, fault pin disabled}}}\par\pard
+\cbpat1{{\cf2{}}        }\par\pard
+\cbpat1{{\cf2{    RPB{1}{3}R}} {\cf11{=}} {\cf2{}}{\cf4{{0}b{0}{1}{0}{1}}}{\cf2{}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{}}    }\par\pard
+\cbpat1{{\cf2{}}    }\par\pard
+\cbpat1{{\cf2{}}    {\cf5{// Enable OC{4}}}}\par\pard
+\cbpat1{{\cf2{    OC{4}CONbits}}{\cf11{.}}{\cf2{ON}} {\cf11{=}} {\cf2{}}{\cf4{{1}}}{\cf2{}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{}}{\cf11{\}}}}\par\pard
+\cbpat1{{\cf2{}}}\par\pard
+\cbpat1{{\cf2{}}{\cf16{static void}} {\cf2{}}{\cf17{InitBarGraphTimingPins}}{\cf2{}}{\cf11{(}}{\cf2{}}{\cf16{void}}{\cf2{}}{\cf11{)}}}\par\pard
+\cbpat1{{\cf2{}}{\cf11{\{}}}\par\pard
+\cbpat1{{\cf2{}}    {\cf5{// RB{5} is not an analog pin, no ANSEL needed}}}\par\pard
+\cbpat1{{\cf2{    TIMING_PIN_TRIS}} {\cf11{=}} {\cf2{}}{\cf4{{0}}}{\cf2{}}{\cf11{;}}    {\cf2{}}{\cf5{// Set as output}}}\par\pard
+\cbpat1{{\cf2{    TIMING_PIN}} {\cf11{=}} {\cf2{}}{\cf4{{0}}}{\cf2{}}{\cf11{;}}         {\cf2{}}{\cf5{// Initialize low}}}\par\pard
+\cbpat1{{\cf2{}}    }\par\pard
+\cbpat1{{\cf2{}}    {\cf5{// Disable analog}}}\par\pard
+\cbpat1{{\cf2{    BAR{1}_ANSEL}} {\cf11{=}} {\cf2{}}{\cf4{{0}}}{\cf2{}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{    BAR{8}_ANSEL}} {\cf11{=}} {\cf2{}}{\cf4{{0}}}{\cf2{}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{}}    }\par\pard
+\cbpat1{{\cf2{}}    {\cf5{// Set all bar graph pins as outputs}}}\par\pard
+\cbpat1{{\cf2{    BAR{1}_TRIS}} {\cf11{=}} {\cf2{}}{\cf4{{0}}}{\cf2{}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{    BAR{2}_TRIS}} {\cf11{=}} {\cf2{}}{\cf4{{0}}}{\cf2{}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{    BAR{3}_TRIS}} {\cf11{=}} {\cf2{}}{\cf4{{0}}}{\cf2{}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{    BAR{4}_TRIS}} {\cf11{=}} {\cf2{}}{\cf4{{0}}}{\cf2{}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{    BAR{5}_TRIS}} {\cf11{=}} {\cf2{}}{\cf4{{0}}}{\cf2{}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{    BAR{6}_TRIS}} {\cf11{=}} {\cf2{}}{\cf4{{0}}}{\cf2{}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{    BAR{7}_TRIS}} {\cf11{=}} {\cf2{}}{\cf4{{0}}}{\cf2{}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{    BAR{8}_TRIS}} {\cf11{=}} {\cf2{}}{\cf4{{0}}}{\cf2{}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{}}    }\par\pard
+\cbpat1{{\cf2{}}    {\cf5{// Initialize all LEDs off}}}\par\pard
+\cbpat1{{\cf2{    BAR{1}}} {\cf11{=}} {\cf2{}}{\cf4{{0}}}{\cf2{}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{    BAR{2}}} {\cf11{=}} {\cf2{}}{\cf4{{0}}}{\cf2{}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{    BAR{3}}} {\cf11{=}} {\cf2{}}{\cf4{{0}}}{\cf2{}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{    BAR{4}}} {\cf11{=}} {\cf2{}}{\cf4{{0}}}{\cf2{}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{    BAR{5}}} {\cf11{=}} {\cf2{}}{\cf4{{0}}}{\cf2{}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{    BAR{6}}} {\cf11{=}} {\cf2{}}{\cf4{{0}}}{\cf2{}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{    BAR{7}}} {\cf11{=}} {\cf2{}}{\cf4{{0}}}{\cf2{}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{    BAR{8}}} {\cf11{=}} {\cf2{}}{\cf4{{0}}}{\cf2{}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{}}{\cf11{\}}}}\par\pard
+\cbpat1{{\cf2{}}}\par\pard
+\cbpat1{{\cf2{}}{\cf16{static void}} {\cf2{}}{\cf17{SetDutyCycle}}{\cf2{}}{\cf11{(}}{\cf2{}}{\cf16{uint{3}{2}_t}} {\cf2{dutyCycle}}{\cf11{)}}}\par\pard
+\cbpat1{{\cf2{}}{\cf11{\{}}}\par\pard
+\cbpat1{{\cf2{}}    {\cf5{// Clamp duty cycle to valid range}}}\par\pard
+\cbpat1{{\cf2{}}    {\cf15{if}} {\cf2{}}{\cf11{(}}{\cf2{dutyCycle}} {\cf11{>}} {\cf2{CurrentPWMPeriod}}{\cf11{)}}}\par\pard
+\cbpat1{{\cf2{}}    {\cf11{\{}}}\par\pard
+\cbpat1{{\cf2{        dutyCycle}} {\cf11{=}} {\cf2{CurrentPWMPeriod}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{}}    {\cf11{\}}}}\par\pard
+\cbpat1{{\cf2{}}    }\par\pard
+\cbpat1{{\cf2{}}    {\cf5{// Write to OC{4}RS (double-buffered, updates on next period match)}}}\par\pard
+\cbpat1{{\cf2{    OC{4}RS}} {\cf11{=}} {\cf2{dutyCycle}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{}}{\cf11{\}}}}\par\pard
+\cbpat1{{\cf2{}}}\par\pard
+\cbpat1{{\cf2{}}{\cf16{static void}} {\cf2{}}{\cf17{InitInputCapture}}{\cf2{}}{\cf11{(}}{\cf2{}}{\cf16{void}}{\cf2{}}{\cf11{)}}}\par\pard
+\cbpat1{{\cf2{}}{\cf11{\{}}}\par\pard
+\cbpat1{{\cf2{}}    {\cf5{// ===== Timer{3} Setup (free-running for Input Capture) =====}}}\par\pard
+\cbpat1{{\cf2{}}    }\par\pard
+\cbpat1{{\cf2{}}    {\cf5{// Disable timer}}}\par\pard
+\cbpat1{{\cf2{    T{3}CONbits}}{\cf11{.}}{\cf2{ON}} {\cf11{=}} {\cf2{}}{\cf4{{0}}}{\cf2{}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{}}    }\par\pard
+\cbpat1{{\cf2{}}    {\cf5{//Select internal PBCLK source}}}\par\pard
+\cbpat1{{\cf2{    T{3}CONbits}}{\cf11{.}}{\cf2{TCS}} {\cf11{=}} {\cf2{}}{\cf4{{0}}}{\cf2{}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{}}    }\par\pard
+\cbpat1{{\cf2{}}    {\cf5{//  Select prescaler ({1}:{8})}}}\par\pard
+\cbpat1{{\cf2{    T{3}CONbits}}{\cf11{.}}{\cf2{TCKPS}} {\cf11{=}} {\cf2{IC_TIMER_PRESCALE}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{}}    }\par\pard
+\cbpat1{{\cf2{}}    {\cf5{// Clear timer register}}}\par\pard
+\cbpat1{{\cf2{    TMR{3}}} {\cf11{=}} {\cf2{}}{\cf4{{0}}}{\cf2{}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{}}    }\par\pard
+\cbpat1{{\cf2{}}    {\cf5{//  Load period register (max for free-running)}}}\par\pard
+\cbpat1{{\cf2{    PR{3}}} {\cf11{=}} {\cf2{}}{\cf4{{0}xFFFF}}{\cf2{}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{}}    }\par\pard
+\cbpat1{{\cf2{}}    {\cf5{//Clear T{3}IF interrupt flag}}}\par\pard
+\cbpat1{{\cf2{    IFS{0}CLR}} {\cf11{=}} {\cf2{_IFS{0}_T{3}IF_MASK}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{}}    }\par\pard
+\cbpat1{{\cf2{}}    {\cf5{//  Enable Timer{3}}}}\par\pard
+\cbpat1{{\cf2{    T{3}CONbits}}{\cf11{.}}{\cf2{ON}} {\cf11{=}} {\cf2{}}{\cf4{{1}}}{\cf2{}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{}}    }\par\pard
+\cbpat1{{\cf2{}}    {\cf5{// ===== Input Capture {2} Setup =====}}}\par\pard
+\cbpat1{{\cf2{}}    }\par\pard
+\cbpat1{{\cf2{}}    {\cf5{// Map IC{2} input to RB{9}}}}\par\pard
+\cbpat1{{\cf2{    IC{2}R}} {\cf11{=}} {\cf2{}}{\cf4{{0}b{0}{1}{0}{0}}}{\cf2{}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{}}    }\par\pard
+\cbpat1{{\cf2{}}    {\cf5{// Disable IC{2} during setup}}}\par\pard
+\cbpat1{{\cf2{    IC{2}CONbits}}{\cf11{.}}{\cf2{ON}} {\cf11{=}} {\cf2{}}{\cf4{{0}}}{\cf2{}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{}}    }\par\pard
+\cbpat1{{\cf2{}}    {\cf5{// Configure IC{2}}}}\par\pard
+\cbpat1{{\cf2{    IC{2}CONbits}}{\cf11{.}}{\cf2{ICTMR}} {\cf11{=}} {\cf2{}}{\cf4{{0}}}{\cf2{}}{\cf11{;}}       {\cf2{}}{\cf5{// Use Timer{3} as source (ICTMR={0} means Timer{3})}}}\par\pard
+\cbpat1{{\cf2{    IC{2}CONbits}}{\cf11{.}}{\cf2{ICI}} {\cf11{=}} {\cf2{}}{\cf4{{0}b{0}{0}}}{\cf2{}}{\cf11{;}}      {\cf2{}}{\cf5{// Interrupt on every capture event}}}\par\pard
+\cbpat1{{\cf2{    IC{2}CONbits}}{\cf11{.}}{\cf2{ICM}} {\cf11{=}} {\cf2{}}{\cf4{{0}b{0}{1}{1}}}{\cf2{}}{\cf11{;}}     {\cf2{}}{\cf5{// Capture on every rising edge}}}\par\pard
+\cbpat1{{\cf2{}}    }\par\pard
+\cbpat1{{\cf2{}}    {\cf5{// Configure IC{2} interrupt}}}\par\pard
+\cbpat1{{\cf2{    IFS{0}CLR}} {\cf11{=}} {\cf2{_IFS{0}_IC{2}IF_MASK}}{\cf11{;}} {\cf2{}}{\cf5{// Clear interrupt flag}}}\par\pard
+\cbpat1{{\cf2{    IPC{2}bits}}{\cf11{.}}{\cf2{IC{2}IP}} {\cf11{=}} {\cf2{}}{\cf4{{6}}}{\cf2{}}{\cf11{;}}         {\cf2{}}{\cf5{// Priority {6}}}}\par\pard
+\cbpat1{{\cf2{    IPC{2}bits}}{\cf11{.}}{\cf2{IC{2}IS}} {\cf11{=}} {\cf2{}}{\cf4{{0}}}{\cf2{}}{\cf11{;}}         {\cf2{}}{\cf5{// Subpriority {0}}}}\par\pard
+\cbpat1{{\cf2{    IEC{0}SET}} {\cf11{=}} {\cf2{_IEC{0}_IC{2}IE_MASK}}{\cf11{;}} {\cf2{}}{\cf5{// Enable IC{2} interrupt}}}\par\pard
+\cbpat1{{\cf2{}}    }\par\pard
+\cbpat1{{\cf2{}}    {\cf5{// Enable Input Capture module}}}\par\pard
+\cbpat1{{\cf2{    IC{2}CONbits}}{\cf11{.}}{\cf2{ON}} {\cf11{=}} {\cf2{}}{\cf4{{1}}}{\cf2{}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{}}{\cf11{\}}}}\par\pard
+\cbpat1{{\cf2{}}}\par\pard
+\cbpat1{{\cf2{}}{\cf16{static void}} {\cf2{}}{\cf17{UpdateBarGraph}}{\cf2{}}{\cf11{(}}{\cf2{}}{\cf16{uint{1}{6}_t}} {\cf2{period}}{\cf11{)}}}\par\pard
+\cbpat1{{\cf2{}}{\cf11{\{}}}\par\pard
+\cbpat1{{\cf2{}}    {\cf16{uint{8}_t}} {\cf2{numBars}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{}}    }\par\pard
+\cbpat1{{\cf2{}}    {\cf5{// Raise timing pin before calculation (Part {2}.{3})}}}\par\pard
+\cbpat1{{\cf2{}}{\cf5{//    TIMING_PIN = {1};}}}\par\pard
+\cbpat1{{\cf2{}}    }\par\pard
+\cbpat1{{\cf2{}}    {\cf5{// Determine number of bars to light}}}\par\pard
+\cbpat1{{\cf2{}}    {\cf15{if}} {\cf2{}}{\cf11{(}}{\cf2{period}} {\cf11{<=}} {\cf2{MIN_PERIOD}}{\cf11{)}}}\par\pard
+\cbpat1{{\cf2{}}    {\cf11{\{}}}\par\pard
+\cbpat1{{\cf2{        numBars}} {\cf11{=}} {\cf2{}}{\cf4{{8}}}{\cf2{}}{\cf11{;}}  {\cf2{}}{\cf5{// Fast = more bars (or {1} if you prefer opposite)}}}\par\pard
+\cbpat1{{\cf2{}}    {\cf11{\}}}}\par\pard
+\cbpat1{{\cf2{}}    {\cf15{else if}} {\cf2{}}{\cf11{(}}{\cf2{period}} {\cf11{>=}} {\cf2{MAX_PERIOD}}{\cf11{)}}}\par\pard
+\cbpat1{{\cf2{}}    {\cf11{\{}}}\par\pard
+\cbpat1{{\cf2{        numBars}} {\cf11{=}} {\cf2{}}{\cf4{{1}}}{\cf2{}}{\cf11{;}}  {\cf2{}}{\cf5{// Slow = fewer bars}}}\par\pard
+\cbpat1{{\cf2{}}    {\cf11{\}}}}\par\pard
+\cbpat1{{\cf2{}}    {\cf15{else}}}\par\pard
+\cbpat1{{\cf2{}}    {\cf11{\{}}}\par\pard
+\cbpat1{{\cf2{}}        {\cf5{// Linear interpolation: {8} - {7} * (period - MIN) / RANGE}}}\par\pard
+\cbpat1{{\cf2{        numBars}} {\cf11{=}} {\cf2{}}{\cf4{{8}}} {\cf2{}}{\cf11{- (}}{\cf2{}}{\cf4{{7}}} {\cf2{}}{\cf11{* (}}{\cf2{period}} {\cf11{-}} {\cf2{MIN_PERIOD}}{\cf11{)) /}} {\cf2{PERIOD_RANGE}}{\cf11{;}}}\par\pard
+\cbpat1{{\cf2{}}    {\cf11{\}}}}\par\pard
+\cbpat1{{\cf2{}}    }\par\pard
+\cbpat1{{\cf2{}}    {\cf5{// Update each LED directly based on numBars (no flicker)}}}\par\pard
+\cbpat1{{\cf2{    BAR{1}}} {\cf11{= (}}{\cf2{numBars}} {\cf11{>=}} {\cf2{}}{\cf4{{1}}}{\cf2{}}{\cf11{);}}}\par\pard
+\cbpat1{{\cf2{    BAR{2}}} {\cf11{= (}}{\cf2{numBars}} {\cf11{>=}} {\cf2{}}{\cf4{{2}}}{\cf2{}}{\cf11{);}}}\par\pard
+\cbpat1{{\cf2{    BAR{3}}} {\cf11{= (}}{\cf2{numBars}} {\cf11{>=}} {\cf2{}}{\cf4{{3}}}{\cf2{}}{\cf11{);}}}\par\pard
+\cbpat1{{\cf2{    BAR{4}}} {\cf11{= (}}{\cf2{numBars}} {\cf11{>=}} {\cf2{}}{\cf4{{4}}}{\cf2{}}{\cf11{);}}}\par\pard
+\cbpat1{{\cf2{    BAR{5}}} {\cf11{= (}}{\cf2{numBars}} {\cf11{>=}} {\cf2{}}{\cf4{{5}}}{\cf2{}}{\cf11{);}}}\par\pard
+\cbpat1{{\cf2{    BAR{6}}} {\cf11{= (}}{\cf2{numBars}} {\cf11{>=}} {\cf2{}}{\cf4{{6}}}{\cf2{}}{\cf11{);}}}\par\pard
+\cbpat1{{\cf2{    BAR{7}}} {\cf11{= (}}{\cf2{numBars}} {\cf11{>=}} {\cf2{}}{\cf4{{7}}}{\cf2{}}{\cf11{);}}}\par\pard
+\cbpat1{{\cf2{    BAR{8}}} {\cf11{= (}}{\cf2{numBars}} {\cf11{>=}} {\cf2{}}{\cf4{{8}}}{\cf2{}}{\cf11{);}}}\par\pard
+\cbpat1{{\cf2{}}    }\par\pard
+\cbpat1{{\cf2{}}    {\cf5{// Lower timing pin after writing to LEDs (Part {2}.{3})}}}\par\pard
+\cbpat1{{\cf2{}}{\cf5{//    TIMING_PIN = {0};}}}\par\pard
+\cbpat1{{\cf2{}}{\cf11{\}}}}\par\pard
+\cbpat1{{\cf2{}}{\cf6{/*------------------------------- Footnotes -------------------------------*/}}{\cf2{}}}\par\pard
+\cbpat1{{\cf2{}}{\cf6{/*------------------------------ End of file ------------------------------*/}}{\cf2{}}}\par\pard
+\cbpat1{{\cf2{}}}\par\pard
+\cbpat1{}}
